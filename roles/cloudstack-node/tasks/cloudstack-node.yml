@@ -16,7 +16,18 @@
     update_cache: yes
 
 - name: Install CloudStack Agent
-  apt: name=cloudstack-agent update_cache=yes state=present force=yes
+  apt:
+    name: cloudstack-agent=4.19.1.2  # Specify the version if needed
+    update_cache: yes
+    state: present
+    install_recommends: yes
+  register: apt_result
+  ignore_errors: yes  # Optional: to prevent failure if this task has issues
+
+- name: Handle errors if installation fails
+  debug:
+    msg: "Failed to install CloudStack Agent: {{ apt_result.stderr }}"
+  when: apt_result.failed
 
 - name: Enable and start libvirtd
   service:

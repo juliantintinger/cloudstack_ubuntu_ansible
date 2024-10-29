@@ -1,7 +1,13 @@
 ---
-- name: Install some utils (not specially for CloudStack)
+- name: Update apt cache
+  apt:
+    update_cache: yes
+  become: yes
+
+- name: Install common utilities
   apt: 
     name:
+      # General utils
       - netcat
       - vim
       - rsync
@@ -21,12 +27,7 @@
       - curl
       - gnupg
       - lsb-release
-    update_cache: yes 
-    state: present
-
-- name: Install some utils for CloudStack
-  apt: 
-    name:
+      # CloudStack specific utils
       - bridge-utils
       - sudo
       - vlan
@@ -40,10 +41,10 @@
       - python3-libvirt
       - python3-pip
       - python3-setuptools
-    update_cache: yes 
     state: present
+  become: yes
 
-- name: Remove cloud-init (special task for my test virtual machine)
+- name: Remove cloud-init packages
   apt: 
     name:
       - cloud-init
@@ -52,3 +53,4 @@
       - gdisk 
     state: absent 
     purge: yes
+  become: yes
