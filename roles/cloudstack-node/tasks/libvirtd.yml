@@ -1,0 +1,59 @@
+---
+- name: Install Libvirt and KVM
+  apt: name={{ item }} update_cache=yes state=present cache_valid_time=3600
+  with_items:
+   - libvirt-daemon-system
+   - libvirt-clients
+   - qemu-kvm
+   - python3-libvirt
+
+- name: Configure Libvirtd daemon
+  lineinfile: dest=/etc/libvirt/libvirtd.conf regexp="{{ item.regexp }}" line="{{ item.line }}" insertafter=EOF 
+  with_items: 
+   - line: 'listen_tls = 0'
+     regexp: '^#?listen_tls'
+   - line: 'listen_tcp = 1'
+     regexp: '^#?listen_tcp'
+   - line: 'tcp_port = \"16509\"'
+     regexp: '^#?tcp_port'
+   - line: 'auth_tcp = \"none\"'
+     regexp: '^#?auth_tcp'
+   - line: 'mdns_adv = 0'
+     regexp: '^#?mdns_adv'
+
+- name: Configure libvirt socket settings
+  lineinfile: dest=/etc/libvirt/libvirtd.socket regexp="{{ item.regexp }}" line="{{ item.line }}" create=yes
+  with_items:
+   - line: 'ListenStream=16509'
+     regexp: '^ListenStream'
+   - line: 'Service=libvirtd.service'
+     regexp: '^Service'
+
+- name: Remove libvirtd AppArmor definition from the kernel
+  shell: apparmor_parser -R /etc/apparmor.d/usr.sbin.libvirtd
+  args:
+    creates: /etc/apparmor.d/disable/usr.sbin.libvirtd
+
+- name: Remove virt-aa-helper AppArmor definition from the kernel
+  shell: apparmor_parser -R /etc/apparmor.d/usr.lib.libvirt.virt-aa-helper
+  args:
+    creates: /etc/apparmor.d/disable/usr.lib.libvirt.virt-aa-helper
+
+- name: Disable AppArmor for libvirtd
+  file: state=link src="/etc/apparmor.d/usr.sbin.libvirtd" path="/etc/apparmor.d/disable/usr.sbin.libvirtd"
+
+- name: Disable AppArmor for virt-aa-helper
+  file: state=link src="/etc/apparmor.d/usr.lib.libvirt.virt-aa-helper" path="/etc/apparmor.d/disable/usr.lib.libvirt.virt-aa-helper" force=yes
+
+- name: Stop libvirtd
+  service: name=libvirtd state=stopped
+
+- name: Make sure that libvirtd is stopped
+  command: "killall -9 libvirtd"
+  ignore_errors: True
+
+- name: Start and enable libvirtd
+  service: name=libvirtd state=started enabled=true
+
+- name: Start and enable virtlogd
+  service: name=virtlogd state=started enabled=true

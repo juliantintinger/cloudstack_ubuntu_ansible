@@ -1,0 +1,54 @@
+---
+- name: Install some utils (not specially for CloudStack)
+  apt: 
+    name:
+      - netcat
+      - vim
+      - rsync
+      - openssl
+      - wget
+      - tcpdump
+      - less
+      - dnsutils
+      - ethtool
+      - python3-mysqldb
+      - linux-firmware
+      - whois
+      - patch
+      - chrony
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
+    update_cache: yes 
+    state: present
+
+- name: Install some utils for CloudStack
+  apt: 
+    name:
+      - bridge-utils
+      - sudo
+      - vlan
+      - ifenslave
+      - openjdk-11-jre-headless
+      - genisoimage
+      - uuid-runtime
+      - qemu-kvm
+      - libvirt-daemon-system
+      - libvirt-clients
+      - python3-libvirt
+      - python3-pip
+      - python3-setuptools
+    update_cache: yes 
+    state: present
+
+- name: Remove cloud-init (special task for my test virtual machine)
+  apt: 
+    name:
+      - cloud-init
+      - cloud-guest-utils 
+      - eatmydata 
+      - gdisk 
+    state: absent 
+    purge: yes

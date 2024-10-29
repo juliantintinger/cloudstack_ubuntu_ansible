@@ -1,0 +1,37 @@
+---
+- name: Configure SSH for root login
+  lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    state: present
+  with_items:
+    - { regexp: '^#?PermitRootLogin', line: 'PermitRootLogin yes' }
+    - { regexp: '^#?PubkeyAuthentication', line: 'PubkeyAuthentication yes' }
+  when: host_enable_ssh_direct_root
+
+- name: Ensure required directories exist
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  with_items:
+    - /etc/ssh/ssh_host_keys
+    - /root/.ssh
+  when: host_enable_ssh_direct_root
+
+- name: Generate SSH host keys
+  command: ssh-keygen -A
+  when: host_enable_ssh_direct_root
+
+- name: Set root password
+  user:
+    name: root
+    password: "{{ host_root_password | password_hash('sha512') }}"
+  when: host_enable_ssh_direct_root
+
+- name: Restart SSH service
+  service:
+    name: ssh
+    state: restarted
+  when: host_enable_ssh_direct_root

@@ -1,0 +1,91 @@
+---
+- name: Install NFS server packages
+  apt: 
+    name: 
+      - nfs-kernel-server
+      - nfs-common
+    update_cache: yes 
+    state: present 
+    cache_valid_time: 3600
+
+- name: Creates directory export NFS primary storage
+  file: 
+    path: /export/primary 
+    state: directory 
+    recurse: yes
+    mode: '0755'
+
+- name: Creates directory export NFS secondary storage
+  file: 
+    path: /export/secondary 
+    state: directory 
+    recurse: yes
+    mode: '0755'
+
+- name: Configure NFS server
+  lineinfile:
+    path: /etc/default/nfs-kernel-server
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    state: present
+  with_items:
+    - { regexp: '^RPCMOUNTDOPTS=', line: 'RPCMOUNTDOPTS="--manage-gids -p 32767"' }
+    - { regexp: '^RPCNFSDCOUNT=', line: 'RPCNFSDCOUNT=8' }
+    - { regexp: '^RPCNFSDPRIORITY=', line: 'RPCNFSDPRIORITY=0' }
+
+- name: Configure NFS ports
+  lineinfile: 
+    path: /etc/modprobe.d/local.conf 
+    line: 'options lockd nlm_udpport=32768 nlm_tcpport=32768'
+    create: yes 
+    state: present
+
+- name: Configure exports
+  lineinfile: 
+    path: /etc/exports 
+    line: "{{ item }}"
+    insertafter: EOF 
+    state: present
+  with_items: 
+    - '/export/primary  *(rw,async,no_root_squash,no_subtree_check,insecure)'
+    - '/export/secondary  *(rw,async,no_root_squash,no_subtree_check,insecure)'
+
+- name: Enable and configure NFSv4
+  lineinfile:
+    path: /etc/default/nfs-common
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    state: present
+  with_items:
+    - { regexp: '^NEED_STATD=', line: 'NEED_STATD="yes"' }
+    - { regexp: '^NEED_IDMAPD=', line: 'NEED_IDMAPD="yes"' }
+
+- name: Configure NFS services
+  lineinfile: 
+    path: /etc/services 
+    regexp: "{{ item }}" 
+    line: "{{ item }}" 
+    insertafter: EOF 
+    state: present
+  with_items: 
+    - 'rpc.nfsd 2049/tcp # RPC nfsd'
+    - 'rpc.nfsd 2049/udp # RPC nfsd'
+    - 'rpc.mountd 32767/tcp # RPC mountd'
+    - 'rpc.mountd 32767/udp # RPC mountd'
+    - 'rcp.lockd 32768/tcp # RPC lockd/nlockmgr'
+    - 'rcp.lockd 32768/udp # RPC lockd/nlockmgr'
+
+- name: Ensure rpcbind is enabled and started
+  service:
+    name: rpcbind
+    state: started
+    enabled: yes
+
+- name: Export filesystems
+  command: exportfs -ra
+
+- name: Restart NFS server
+  service:
+    name: nfs-kernel-server
+    state: restarted
+    enabled: yes

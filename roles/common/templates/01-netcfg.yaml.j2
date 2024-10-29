@@ -1,0 +1,18 @@
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    {{ host_interface_device }}:
+      dhcp4: no
+      dhcp6: no
+  bridges:
+    {{ host_interface_bridge }}:
+      interfaces: [{{ host_interface_device }}]
+      addresses: [{{ ansible_default_ipv4.address }}/{{ ansible_default_ipv4.netmask | ipaddr('prefix') }}]
+      gateway4: {{ ansible_default_ipv4.gateway }}
+      nameservers:
+        addresses: [{{ host_dns1 }}]
+        search: [{{ host_dns_domain }}]
+      parameters:
+        stp: false
+        forward-delay: 4

@@ -1,0 +1,25 @@
+- name: Add CloudStack repository
+  lineinfile: dest=/etc/apt/sources.list.d/cloudstack.list regexp='deb {{ cloudstack_repo_url | mandatory }}' line='deb {{ cloudstack_repo_url | mandatory }}' create=yes state=present
+
+- name: Add CloudStack repo key
+  apt_key: id="{{ cloudstack_repo_key_id | mandatory }}" url="{{ cloudstack_repo_key | mandatory }}" state=present
+  when: add_apt_key
+
+- name: Install required packages
+  apt: 
+    name: 
+      - qemu-kvm
+      - libvirt-daemon-system
+      - libvirt-clients
+      - bridge-utils
+    state: present
+    update_cache: yes
+
+- name: Install CloudStack Agent
+  apt: name=cloudstack-agent update_cache=yes state=present force=yes
+
+- name: Enable and start libvirtd
+  service:
+    name: libvirtd
+    state: started
+    enabled: yes

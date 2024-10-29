@@ -1,0 +1,41 @@
+---
+- name: Install netplan.io
+  apt:
+    name: netplan.io
+    state: present
+
+- name: Check if netplan config exists
+  stat:
+    path: /etc/netplan/01-netcfg.yaml
+  register: netplan_config
+
+- name: Backup existing netplan config
+  copy:
+    src: /etc/netplan/01-netcfg.yaml
+    dest: /etc/netplan/01-netcfg.yaml.backup
+    remote_src: yes
+  when: netplan_config.stat.exists
+
+- name: Configure network bridge using netplan
+  template:
+    src: 01-netcfg.yaml.j2
+    dest: /etc/netplan/01-netcfg.yaml
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Apply netplan configuration
+  command: netplan apply
+  async: 0
+  poll: 0
+  ignore_errors: true
+
+- name: Waiting for server to come back
+  wait_for:
+    port: 22
+    host: "{{ inventory_hostname }}"
+    search_regex: OpenSSH
+    delay: 30
+    timeout: 300
+  delegate_to: localhost
+  become: false

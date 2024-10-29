@@ -1,0 +1,61 @@
+---
+- name: Install NFS client packages
+  apt:
+    name:
+      - nfs-common
+      - rpcbind
+      - keyutils
+    update_cache: yes
+    state: present
+    cache_valid_time: 3600
+
+- name: Configure NFS client options
+  lineinfile:
+    path: /etc/default/nfs-common
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    state: present
+  with_items:
+    - { regexp: '^STATDOPTS=', line: 'STATDOPTS="--port 32765 --outgoing-port 32766"' }
+    - { regexp: '^NEED_STATD=', line: 'NEED_STATD="yes"' }
+    - { regexp: '^NEED_IDMAPD=', line: 'NEED_IDMAPD="yes"' }
+
+- name: Configure NFS domain
+  lineinfile:
+    path: /etc/idmapd.conf
+    regexp: "{{ item }}"
+    line: 'Domain = {{ nfs_domain | mandatory }}'
+    state: present
+  with_items:
+    - '^# Domain = localdomain'
+    - '^Domain = .*$'
+
+- name: Configure NFS mount options
+  lineinfile:
+    path: /etc/nfsmount.conf
+    line: "{{ item }}"
+    create: yes
+    state: present
+  with_items:
+    - '[NFSMount]'
+    - 'Nfsvers=4'
+    - 'Proto=tcp'
+    - 'Retrans=2'
+    - 'Timeo=100'
+    - 'Hard=yes'
+    - 'Intr=no'
+
+- name: Ensure rpcbind is enabled and started
+  service:
+    name: rpcbind
+    state: started
+    enabled: yes
+
+- name: Create mount points
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  with_items:
+    - /mnt/primary
+    - /mnt/secondary
