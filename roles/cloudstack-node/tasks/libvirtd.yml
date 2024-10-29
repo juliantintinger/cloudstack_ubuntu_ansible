@@ -1,9 +1,7 @@
 - name: Install Libvirt and KVM dependencies
   apt: 
     name: "{{ packages }}"
-    update_cache: yes 
     state: present
-    cache_valid_time: 3600
   vars:
     packages:
       - libvirt-daemon-system
@@ -15,68 +13,131 @@
       - virtinst
 
 - name: Configure Libvirtd daemon
-  lineinfile: dest=/etc/libvirt/libvirtd.conf regexp="{{ item.regexp }}" line="{{ item.line }}" insertafter=EOF 
-  with_items: 
-   - line: 'listen_tls = 0'
-     regexp: '^#?listen_tls'
-   - line: 'listen_tcp = 1'
-     regexp: '^#?listen_tcp'
-   - line: 'tcp_port = \"16509\"'
-     regexp: '^#?tcp_port'
-   - line: 'auth_tcp = \"none\"'
-     regexp: '^#?auth_tcp'
-   - line: 'mdns_adv = 0'
-     regexp: '^#?mdns_adv'
+  lineinfile: 
+    path: /etc/libvirt/libvirtd.conf
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    insertafter: EOF
+  loop: 
+    - { line: 'listen_tls = 0', regexp: '^#?listen_tls' }
+    - { line: 'listen_tcp = 1', regexp: '^#?listen_tcp' }
+    - { line: 'tcp_port = "16509"', regexp: '^#?tcp_port' }
+    - { line: 'auth_tcp = "none"', regexp: '^#?auth_tcp' }
+    - { line: 'mdns_adv = 0', regexp: '^#?mdns_adv' }
 
-- name: Configure libvirt socket settings
-  lineinfile: dest=/etc/default/libvirtd regexp="{{ item.regexp }}" line="{{ item.line }}" create=yes
-  with_items:
-   - line: 'LIBVIRTD_ARGS="--listen"'
-     regexp: '^LIBVIRTD_ARGS'
+- name: Remove old libvirtd args configuration
+  file:
+    path: /etc/default/libvirtd
+    state: absent
 
-- name: Remove libvirtd AppArmor definition from the kernel
-  shell: apparmor_parser -R /etc/apparmor.d/usr.sbin.libvirtd
+- name: Remove AppArmor definitions for libvirtd and virt-aa-helper
+  shell: apparmor_parser -R {{ item }}
   args:
-    creates: /etc/apparmor.d/disable/usr.sbin.libvirtd
+    creates: "/etc/apparmor.d/disable/{{ item | basename }}"
+  loop:
+    - /etc/apparmor.d/usr.sbin.libvirtd
+    - /etc/apparmor.d/usr.lib.libvirt.virt-aa-helper
   ignore_errors: yes
 
-- name: Remove virt-aa-helper AppArmor definition from the kernel
-  shell: apparmor_parser -R /etc/apparmor.d/usr.lib.libvirt.virt-aa-helper
-  args:
-    creates: /etc/apparmor.d/disable/usr.lib.libvirt.virt-aa-helper
+- name: Disable AppArmor for libvirtd and virt-aa-helper
+  file: 
+    src: "/etc/apparmor.d/{{ item }}"
+    path: "/etc/apparmor.d/disable/{{ item | basename }}"
+    state: link
+  loop:
+    - usr.sbin.libvirtd
+    - usr.lib.libvirt.virt-aa-helper
+
+- name: Check if necessary kernel modules are loaded
+  shell: lsmod | grep -E 'kvm|kvm_amd' || true
+  register: kvm_modules
+
+- name: Load KVM kernel modules if not loaded
+  modprobe:
+    name: "{{ item }}"
+  loop:
+    - kvm
+    - kvm_amd
+  when: "'kvm' not in kvm_modules.stdout"
+
+- name: Stop all related services
+  systemd:
+    name: "{{ item }}"
+    state: stopped
+  loop:
+    - libvirtd
+    - libvirtd.socket
+    - virtlogd
+    - virtlogd.socket
   ignore_errors: yes
 
-- name: Disable AppArmor for libvirtd
-  file: state=link src="/etc/apparmor.d/usr.sbin.libvirtd" path="/etc/apparmor.d/disable/usr.sbin.libvirtd"
-
-- name: Disable AppArmor for virt-aa-helper
-  file: state=link src="/etc/apparmor.d/usr.lib.libvirt.virt-aa-helper" path="/etc/apparmor.d/disable/usr.lib.libvirt.virt-aa-helper" force=yes
-
-- name: Stop libvirtd service
-  service: name=libvirtd state=stopped
+- name: Kill any remaining processes
+  shell: "pkill -9 {{ item }} || true"
+  loop:
+    - libvirtd
+    - dnsmasq
+    - virtlogd
   ignore_errors: yes
 
-- name: Stop libvirtd socket
-  service: name=libvirtd.socket state=stopped
+- name: Remove existing socket files
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /var/run/libvirt/libvirt-sock
+    - /var/run/libvirt/libvirt-sock-ro
+    - /var/run/libvirt/virtlogd-sock
+    - /var/run/libvirt/virtlogd-admin-sock
   ignore_errors: yes
 
-- name: Kill any remaining libvirtd processes
-  shell: pkill -9 libvirtd || true
-  ignore_errors: yes
-
-- name: Kill any remaining dnsmasq processes started by libvirt
-  shell: pkill -9 dnsmasq || true
+- name: Reset failed state for services
+  command: systemctl reset-failed {{ item }}
+  loop:
+    - libvirtd
+    - libvirtd.socket
+    - virtlogd
+    - virtlogd.socket
   ignore_errors: yes
 
 - name: Wait for processes to fully stop
   pause:
     seconds: 5
 
-- name: Start virtlogd
-  service: name=virtlogd state=started enabled=true
+- name: Reload systemd daemon
+  systemd:
+    daemon_reload: yes
+
+- name: Start virtlogd socket
+  systemd:
+    name: virtlogd.socket
+    state: started
+    enabled: true
 
 - name: Start libvirtd socket
-  service: name=libvirtd.socket state=started enabled=true
+  systemd:
+    name: libvirtd.socket
+    state: started
+    enabled: true
 
-- name: Start libvirtd service
-  service: name=libvirtd state=started enabled=true
+- name: Wait for sockets to initialize
+  pause:
+    seconds: 5
+
+- name: Start and enable libvirtd service
+  systemd:
+    name: libvirtd
+    state: started
+    enabled: true
+    daemon_reload: yes
+
+- name: Wait for libvirtd to be fully operational
+  wait_for:
+    path: /var/run/libvirt/libvirt-sock
+    state: present
+    timeout: 30
+
+- name: Verify libvirtd is running
+  command: systemctl status libvirtd
+  register: libvirtd_status
+  changed_when: false
+  failed_when: "'active (running)' not in libvirtd_status.stdout"
