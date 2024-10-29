@@ -80,8 +80,14 @@ host_root_password: cloudPass
 3. Update `ansible_hosts` with your target server
 4. Run the playbook:
 
+
+
 ```bash
-ansible-playbook -v -s -i ansible_hosts -e host=<IP_hostname> -e user=ubuntu cs-aio-deploy.yml
+ansible-playbook -v -b -i ansible_hosts -e host=cirrus -e user=timothy cs-aio-deploy.yml
+```
+##verbose mode
+```bash
+ansible-playbook -vvv -b -i ansible_hosts -e host=cirrus -e user=timothy cs-aio-deploy.yml
 ```
 
 ## Post Installation

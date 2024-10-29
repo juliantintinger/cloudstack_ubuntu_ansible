@@ -1,3 +1,2 @@
 ---
-- include: mysql_server.yml
-
+- include_tasks: mysql_server.yml

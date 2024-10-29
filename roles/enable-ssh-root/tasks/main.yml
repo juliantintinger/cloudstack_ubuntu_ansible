@@ -1,2 +1,2 @@
 ---
-- include: enable-ssh-root.yml
+- include_tasks: enable-ssh-root.yml

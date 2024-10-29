@@ -1,2 +1,2 @@
 ---
-- include: cloudstack-manager.yml
+- include_tasks: cloudstack-manager.yml

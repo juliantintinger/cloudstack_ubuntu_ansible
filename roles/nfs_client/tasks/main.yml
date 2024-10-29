@@ -1,2 +1,2 @@
 ---
-- include: nfs_client.yml
+- include_tasks: nfs_client.yml
