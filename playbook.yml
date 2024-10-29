@@ -1,0 +1,22 @@
+---
+- name: Manage libvirtd service
+  hosts: cirrus
+  become: yes
+
+  tasks:
+    - name: Check status of libvirtd service
+      systemd:
+        name: libvirtd.service
+        state: started
+      register: libvirtd_status
+      ignore_errors: yes
+
+    - name: Debug service status
+      debug:
+        var: libvirtd_status
+
+    - name: Restart libvirtd service if it failed
+      systemd:
+        name: libvirtd.service
+        state: restarted
+      when: libvirtd_status is failed
