@@ -22,9 +22,6 @@
 - name: CloudStack Database setup
   command: /usr/bin/cloudstack-setup-databases cloud:{{ database_cloud_password }}@localhost --deploy-as=root:{{ database_root_password }} -e file -m {{ database_cloud_password }} -k {{ database_cloud_password }}
 
-- name: Change Session timeout to 4 hours (for my comfort)
-  lineinfile: dest=/etc/cloudstack/management/web.xml regexp='<session-timeout>30</session-timeout>' line='<session-timeout>14400</session-timeout>'
-
 - name: CloudStack Install system vm template
   file: path=/tmpmnt state=directory recurse=yes
 
@@ -39,6 +36,38 @@
 
 - name: Remove tmpmnt directory
   file: path=/tmpmnt state=absent
+
+- name: Ensure CloudStack management directory exists
+  file:
+    path: /etc/cloudstack/management
+    state: directory
+    mode: '0755'
+
+- name: Create cloudstack.properties if it doesn't exist
+  copy:
+    dest: /etc/cloudstack/management/cloudstack.properties
+    content: |
+      # Database connection properties
+      cloudstack.db.username=root
+      cloudstack.db.password={{ database_cloud_password }}
+      cloudstack.db.url=jdbc:mysql://localhost:3306/cloudstack
+    force: no
+
+- name: Create web.xml if it doesn't exist
+  copy:
+    dest: /etc/cloudstack/management/web.xml
+    content: |
+      <?xml version="1.0" encoding="UTF-8"?>
+      <web-app xmlns="http://java.sun.com/xml/ns/javaee"
+               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+               xsi:schemaLocation="http://java.sun.com/xml/ns/javaee
+                                 http://java.sun.com/xml/ns/javaee/web-app_3_0.xsd"
+               version="3.0">
+        <session-config>
+          <session-timeout>14400</session-timeout>
+        </session-config>
+      </web-app>
+    force: no
 
 - name: Start cloudstack-management
   service: name=cloudstack-management state=started enabled=true
