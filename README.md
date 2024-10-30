@@ -81,6 +81,10 @@ host_root_password: cloudPass
 4. Run the playbook:
 
 
+## Do not use this
+```bash
+ansible-playbook -v -b -i ansible_hosts -e host=cirrus -e user=timothy playbook.yml
+```
 
 ```bash
 ansible-playbook -v -b -i ansible_hosts -e host=cirrus -e user=timothy cs-aio-deploy.yml

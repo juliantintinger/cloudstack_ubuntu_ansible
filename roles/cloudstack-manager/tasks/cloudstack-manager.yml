@@ -1,4 +1,3 @@
----
 # Repository and Package Installation
 - name: Add CloudStack repository
   lineinfile:
@@ -49,35 +48,11 @@
     name: mysql-server
     state: present
 
-- name: Setup CloudStack database
+- name: Setup Cloudstack Database
   command: "/usr/bin/cloudstack-setup-databases cloud:{{ database_cloud_password }}@localhost --deploy-as=root:{{ database_root_password }} -e file -m {{ database_cloud_password }} -k {{ database_cloud_password }}"
 
-- name: Check current database schema version
-  mysql_query:
-    login_user: root
-    login_password: "{{ database_root_password }}"
-    login_db: cloud
-    query: "SELECT version FROM schema_version;"
-  register: db_version
-  ignore_errors: yes  # To handle cases where schema_version might not exist yet
-
-- name: Upgrade database if necessary
-  command: "/usr/bin/cloudstack-setup-databases cloud:{{ database_cloud_password }}@localhost --deploy-as=root:{{ database_root_password }} --upgrade"
-  when: db_version.failed or (db_version.results[0].version is not defined or db_version.results[0].version != expected_version)
-
-- name: Check current database schema version after upgrade
-  mysql_query:
-    login_user: root
-    login_password: "{{ database_root_password }}"
-    login_db: cloud
-    query: "SELECT version FROM schema_version;"
-  register: db_version_after_upgrade
-
-- name: Verify database version
-  assert:
-    that:
-      - db_version_after_upgrade.results[0].version == expected_version
-    fail_msg: "Database version is not as expected! Found: {{ db_version_after_upgrade.results[0].version }}"
+- name: Upgrade CloudStack Database
+  command: "/usr/bin/cloudstack-migrate-databases -d {{ database_cloud_password }} -m {{ database_cloud_password }} -n {{ database_cloud_password }} -e {{ database_cloud_password }} -f"
 
 # System VM Template Installation
 - name: Create temporary mount point for secondary storage

@@ -1,22 +1,130 @@
 ---
-- name: Manage libvirtd service
-  hosts: cirrus
-  become: yes
-
+- name: CloudStack Management Server Setup
+  hosts: "{{ host | mandatory }}"
+  remote_user: "{{ user | mandatory }}"
+  vars_files:
+    - group_vars/env.yml
   tasks:
-    - name: Check status of libvirtd service
-      systemd:
-        name: libvirtd.service
+    # Database Setup
+    - name: Ensure MySQL is installed
+      package:
+        name: mysql-server
+        state: present
+
+    # - name: Check if cloud database exists
+    #   mysql_db:
+    #     name: cloud
+    #     login_user: root
+    #     login_password: "{{ database_root_password }}"
+    #     state: present
+    #   ignore_errors: yes
+    #   register: db_exists
+
+    # - name: Setup Cloudstack Database
+    #   command: "/usr/bin/cloudstack-setup-databases cloud:{{ database_cloud_password }}@localhost --deploy-as=root:{{ database_root_password }} -e file -m {{ database_cloud_password }} -k {{ database_cloud_password }}"
+    #   when: db_version.failed or (db_version.results[0].version is not defined or db_version.results[0].version != expected_version)
+
+    - name: Upgrade CloudStack database if needed
+      command: "/usr/bin/cloudstack-migrate-databases -d {{ database_cloud_password }} -m {{ database_cloud_password }} -f"
+
+    # System VM Template Installation
+    - name: Create temporary mount point for secondary storage
+      file:
+        path: /tmpmnt
+        state: directory
+        recurse: yes
+
+    - name: Mount NFS secondary storage
+      command: "mount -t nfs {{ nfs_secondary_storage_host }}:/export/secondary /tmpmnt"
+
+    - name: Install system VM template
+      command: "/usr/share/cloudstack-common/scripts/storage/secondary/cloud-install-sys-tmplt -m /tmpmnt -u {{ url_systemvm_template }} -h kvm -s {{ database_cloud_password }} -F"
+
+    - name: Unmount secondary storage
+      command: "umount /tmpmnt"
+
+    - name: Remove temporary mount directory
+      file:
+        path: /tmpmnt
+        state: absent
+
+    # Management Configuration
+    - name: Ensure CloudStack management directory exists
+      file:
+        path: /etc/cloudstack/management
+        state: directory
+        mode: '0755'
+
+    - name: Create web.xml configuration
+      copy:
+        dest: /etc/cloudstack/management/web.xml
+        content: |
+          <?xml version="1.0" encoding="UTF-8"?>
+          <web-app xmlns="http://java.sun.com/xml/ns/javaee"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://java.sun.com/xml/ns/javaee
+                                     http://java.sun.com/xml/ns/javaee/web-app_3_0.xsd"
+                   version="3.0">
+            <session-config>
+              <session-timeout>14400</session-timeout>
+            </session-config>
+          </web-app>
+        force: no
+
+    # Service Management
+    - name: Start and enable CloudStack management service
+      service:
+        name: cloudstack-management
         state: started
-      register: libvirtd_status
+        enabled: true
+
+    # Health Checks
+    - name: Check CloudStack management service status
+      systemd:
+        name: cloudstack-management
+        state: started
+      register: cloudstack_status
+
+    - name: Verify CloudStack management service is running
+      fail:
+        msg: "CloudStack management service is not running!"
+      when: cloudstack_status.status.ActiveState != 'active'
+
+    - name: Check MySQL service status
+      systemd:
+        name: mysql
+        state: started
+      register: mysql_status
+
+    - name: Verify MySQL service is running
+      fail:
+        msg: "MySQL service is not running!"
+      when: mysql_status.status.ActiveState != 'active'
+
+    - name: Check CloudStack API availability
+      uri:
+        url: "http://{{ ansible_host }}:8080/client/api"
+        method: GET
+        return_content: yes
+      register: api_response
       ignore_errors: yes
 
-    - name: Debug service status
-      debug:
-        var: libvirtd_status
+    - name: Verify API is reachable
+      fail:
+        msg: "CloudStack API is not reachable!"
+      when: api_response.status is not defined or api_response.status != 200
 
-    - name: Restart libvirtd service if it failed
-      systemd:
-        name: libvirtd.service
-        state: restarted
-      when: libvirtd_status is failed
+    - name: Check CloudStack logs for errors
+      shell: tail -n 50 /var/log/cloudstack/management/cloudstack-management.log | grep -i error
+      register: log_errors
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Display log errors if found
+      debug:
+        var: log_errors.stdout_lines
+      when: log_errors.stdout is defined and log_errors.stdout | length > 0
+
+    - name: Display CloudStack console access information
+      debug:
+        msg: "CloudStack console available at http://{{ inventory_hostname }}:8080/client/ (Login: admin, Password: password)"
