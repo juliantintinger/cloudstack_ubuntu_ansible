@@ -1,59 +1,97 @@
+---
+# Repository and Package Installation
 - name: Add CloudStack repository
-  lineinfile: dest=/etc/apt/sources.list.d/cloudstack.list regexp='deb {{ cloudstack_repo_url | mandatory }}' line='deb {{ cloudstack_repo_url | mandatory }}' create=yes state=present
+  lineinfile:
+    dest: /etc/apt/sources.list.d/cloudstack.list
+    regexp: 'deb {{ cloudstack_repo_url | mandatory }}'
+    line: 'deb {{ cloudstack_repo_url | mandatory }}'
+    create: yes
+    state: present
 
-- name: Add CloudStack repo key
-  apt_key: id="{{ cloudstack_repo_key_id | mandatory }}" url="{{ cloudstack_repo_key | mandatory }}" state=present
+- name: Add CloudStack repository key
+  apt_key:
+    id: "{{ cloudstack_repo_key_id | mandatory }}"
+    url: "{{ cloudstack_repo_key | mandatory }}"
+    state: present
   when: add_apt_key
 
 - name: Install OpenJDK
-  apt: name=openjdk-11-jdk update_cache=yes state=present
+  apt:
+    name: openjdk-11-jdk
+    update_cache: yes
+    state: present
 
-- name: Install CloudStack Management
-  apt: name=cloudstack-management update_cache=yes state=present force=yes
+- name: Install CloudStack Management package
+  apt:
+    name: cloudstack-management
+    update_cache: yes
+    state: present
+    force: yes
 
-- name: Stop cloudstack-management
-  service: name=cloudstack-management state=stopped
+# Initial Service Configuration
+- name: Stop CloudStack management service for initial configuration
+  service:
+    name: cloudstack-management
+    state: stopped
 
-- name: Configure sudo for cloud users
-  lineinfile: dest=/etc/sudoers regexp="{{ item }}" line="{{ item }}" insertafter=EOF 
-  with_items: 
-   - 'cloud ALL =NOPASSWD : /bin/chmod, /bin/cp, /bin/mkdir, /bin/mount, /bin/umount, /usr/bin/keytool'
-  
-- name: CloudStack Database setup
-  command: /usr/bin/cloudstack-setup-databases cloud:{{ database_cloud_password }}@localhost --deploy-as=root:{{ database_root_password }} -e file -m {{ database_cloud_password }} -k {{ database_cloud_password }}
+- name: Configure sudo permissions for cloud users
+  lineinfile:
+    dest: /etc/sudoers
+    regexp: "{{ item }}"
+    line: "{{ item }}"
+    insertafter: EOF
+  with_items:
+    - 'cloud ALL =NOPASSWD : /bin/chmod, /bin/cp, /bin/mkdir, /bin/mount, /bin/umount, /usr/bin/keytool'
 
-- name: CloudStack Install system vm template
-  file: path=/tmpmnt state=directory recurse=yes
+# Database Setup and Upgrade
+- name: Setup CloudStack database
+  command: >
+    /usr/bin/cloudstack-setup-databases 
+    cloud:{{ database_cloud_password }}@localhost 
+    --deploy-as=root:{{ database_root_password }} 
+    -e file 
+    -m {{ database_cloud_password }} 
+    -k {{ database_cloud_password }}
 
-- name: CloudStack mount secondary storage
-  command: mount -t nfs {{ nfs_secondary_storage_host }}:/export/secondary /tmpmnt  
+- name: Upgrade CloudStack database
+  command: /usr/bin/cloudstack-upgrade-databases cloud:{{ database_cloud_password }}@localhost --upgrade-to=4.19.1.2
+  ignore_errors: yes
 
-- name: CloudStack Install system vm template
-  command: /usr/share/cloudstack-common/scripts/storage/secondary/cloud-install-sys-tmplt -m /tmpmnt -u {{ url_systemvm_template }} -h kvm -s {{ database_cloud_password }} -F
+# System VM Template Installation
+- name: Create temporary mount point for secondary storage
+  file:
+    path: /tmpmnt
+    state: directory
+    recurse: yes
 
-- name: CloudStack umount secondary storage
+- name: Mount NFS secondary storage
+  command: mount -t nfs {{ nfs_secondary_storage_host }}:/export/secondary /tmpmnt
+
+- name: Install system VM template
+  command: >
+    /usr/share/cloudstack-common/scripts/storage/secondary/cloud-install-sys-tmplt 
+    -m /tmpmnt 
+    -u {{ url_systemvm_template }} 
+    -h kvm 
+    -s {{ database_cloud_password }} 
+    -F
+
+- name: Unmount secondary storage
   command: umount /tmpmnt
 
-- name: Remove tmpmnt directory
-  file: path=/tmpmnt state=absent
+- name: Remove temporary mount directory
+  file:
+    path: /tmpmnt
+    state: absent
 
+# Management Configuration
 - name: Ensure CloudStack management directory exists
   file:
     path: /etc/cloudstack/management
     state: directory
     mode: '0755'
 
-- name: Create cloudstack.properties if it doesn't exist
-  copy:
-    dest: /etc/cloudstack/management/cloudstack.properties
-    content: |
-      # Database connection properties
-      cloudstack.db.username=root
-      cloudstack.db.password={{ database_cloud_password }}
-      cloudstack.db.url=jdbc:mysql://localhost:3306/cloudstack
-    force: no
-
-- name: Create web.xml if it doesn't exist
+- name: Create web.xml configuration
   copy:
     dest: /etc/cloudstack/management/web.xml
     content: |
@@ -69,8 +107,60 @@
       </web-app>
     force: no
 
-- name: Start cloudstack-management
-  service: name=cloudstack-management state=started enabled=true
+# Service Management
+- name: Start and enable CloudStack management service
+  service:
+    name: cloudstack-management
+    state: started
+    enabled: true
 
-- name: "Try CloudStack console:"
-  debug: msg="Go to http://{{ inventory_hostname }}:8080/client/ -  Login=admin - Password=password"
+# Health Checks
+- name: Check CloudStack management service status
+  systemd:
+    name: cloudstack-management
+    state: started
+  register: cloudstack_status
+
+- name: Verify CloudStack management service is running
+  fail:
+    msg: "CloudStack management service is not running!"
+  when: cloudstack_status.status.ActiveState != 'active'
+
+- name: Check MySQL service status
+  systemd:
+    name: mysql
+    state: started
+  register: mysql_status
+
+- name: Verify MySQL service is running
+  fail:
+    msg: "MySQL service is not running!"
+  when: mysql_status.status.ActiveState != 'active'
+
+- name: Check CloudStack API availability
+  uri:
+    url: "http://{{ ansible_host }}:8080/client/api"
+    method: GET
+    return_content: yes
+  register: api_response
+  ignore_errors: yes
+
+- name: Verify API is reachable
+  fail:
+    msg: "CloudStack API is not reachable!"
+  when: api_response.status is not defined or api_response.status != 200
+
+- name: Check CloudStack logs for errors
+  shell: tail -n 50 /var/log/cloudstack/management/cloudstack-management.log | grep -i error
+  register: log_errors
+  changed_when: false
+  ignore_errors: yes
+
+- name: Display log errors if found
+  debug:
+    var: log_errors.stdout_lines
+  when: log_errors.stdout is defined and log_errors.stdout | length > 0
+
+- name: Display CloudStack console access information
+  debug:
+    msg: "CloudStack console available at http://{{ inventory_hostname }}:8080/client/ (Login: admin, Password: password)"
