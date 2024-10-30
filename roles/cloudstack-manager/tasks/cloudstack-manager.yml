@@ -43,19 +43,41 @@
   with_items:
     - 'cloud ALL =NOPASSWD : /bin/chmod, /bin/cp, /bin/mkdir, /bin/mount, /bin/umount, /usr/bin/keytool'
 
-# Database Setup and Upgrade
-- name: Setup CloudStack database
-  command: >
-    /usr/bin/cloudstack-setup-databases 
-    cloud:{{ database_cloud_password }}@localhost 
-    --deploy-as=root:{{ database_root_password }} 
-    -e file 
-    -m {{ database_cloud_password }} 
-    -k {{ database_cloud_password }}
+# Database Setup
+- name: Ensure MySQL is installed
+  package:
+    name: mysql-server
+    state: present
 
-- name: Upgrade CloudStack database
-  command: /usr/bin/cloudstack-upgrade-databases cloud:{{ database_cloud_password }}@localhost --upgrade-to=4.19.1.2
-  ignore_errors: yes
+- name: Setup CloudStack database
+  command: "/usr/bin/cloudstack-setup-databases cloud:{{ database_cloud_password }}@localhost --deploy-as=root:{{ database_root_password }} -e file -m {{ database_cloud_password }} -k {{ database_cloud_password }}"
+
+- name: Check current database schema version
+  mysql_query:
+    login_user: root
+    login_password: "{{ database_root_password }}"
+    login_db: cloud
+    query: "SELECT version FROM schema_version;"
+  register: db_version
+  ignore_errors: yes  # To handle cases where schema_version might not exist yet
+
+- name: Upgrade database if necessary
+  command: "/usr/bin/cloudstack-setup-databases cloud:{{ database_cloud_password }}@localhost --deploy-as=root:{{ database_root_password }} --upgrade"
+  when: db_version.failed or (db_version.results[0].version is not defined or db_version.results[0].version != expected_version)
+
+- name: Check current database schema version after upgrade
+  mysql_query:
+    login_user: root
+    login_password: "{{ database_root_password }}"
+    login_db: cloud
+    query: "SELECT version FROM schema_version;"
+  register: db_version_after_upgrade
+
+- name: Verify database version
+  assert:
+    that:
+      - db_version_after_upgrade.results[0].version == expected_version
+    fail_msg: "Database version is not as expected! Found: {{ db_version_after_upgrade.results[0].version }}"
 
 # System VM Template Installation
 - name: Create temporary mount point for secondary storage
@@ -65,19 +87,13 @@
     recurse: yes
 
 - name: Mount NFS secondary storage
-  command: mount -t nfs {{ nfs_secondary_storage_host }}:/export/secondary /tmpmnt
+  command: "mount -t nfs {{ nfs_secondary_storage_host }}:/export/secondary /tmpmnt"
 
 - name: Install system VM template
-  command: >
-    /usr/share/cloudstack-common/scripts/storage/secondary/cloud-install-sys-tmplt 
-    -m /tmpmnt 
-    -u {{ url_systemvm_template }} 
-    -h kvm 
-    -s {{ database_cloud_password }} 
-    -F
+  command: "/usr/share/cloudstack-common/scripts/storage/secondary/cloud-install-sys-tmplt -m /tmpmnt -u {{ url_systemvm_template }} -h kvm -s {{ database_cloud_password }} -F"
 
 - name: Unmount secondary storage
-  command: umount /tmpmnt
+  command: "umount /tmpmnt"
 
 - name: Remove temporary mount directory
   file:
