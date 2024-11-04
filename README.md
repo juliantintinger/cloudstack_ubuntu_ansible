@@ -76,9 +76,11 @@ host_root_password: cloudPass
 ## Installation
 
 1. Clone this repository
-2. Modify `group_vars/env.yml` according to your environment
-3. Update `ansible_hosts` with your target server
-4. Run the playbook:
+2. Create ssh key:
+ssh-keygen -t rsa -N "" -f ~/.ssh/id_rsa && mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys
+3. Modify `group_vars/env.yml` according to your environment
+4. Update `ansible_hosts` with your target server
+5. Run the playbook:
 
 
 ## Do not use this
